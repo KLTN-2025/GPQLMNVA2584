@@ -9,7 +9,6 @@ import lombok.*;
 @Builder
 public class ClassRequest {
     private String className;
-    private String classCode;
     private String grade;
     private String roomNumber;
     private String academicYear;

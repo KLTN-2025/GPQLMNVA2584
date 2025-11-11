@@ -16,7 +16,7 @@ import '@/assets/styles.scss';
 import { useAuthStore } from '@/stores/auth.js';
 import { setAuthStore } from '@/stores/storeRegistry.js';
 import { attachAuthGuard } from '@/router/guard.js';
-import SweetAlert from './plugins/sweetalert.js';
+import SweetAlertPlugin from './plugins/sweetalert';
 const app = createApp(App);
 const pinia = createPinia();
 
@@ -37,6 +37,6 @@ app.use(ConfirmationService);
 
 // ĐĂNG KÝ DIRECTIVE CHO v-styleclass
 app.directive('styleclass', StyleClass);
-app.use(SweetAlert);
+app.use(SweetAlertPlugin);
 app.use(router);
 app.mount('#app');

@@ -24,14 +24,6 @@ public class ClassesServiceImpl implements ClassesService {
 
     @Override
     public ApiResponse<ClassResponse> createClass(ClassRequest request) {
-        if (classesRepository.existsByClassCode(request.getClassCode())) {
-            return ApiResponse.<ClassResponse>builder()
-                    .status(HttpStatus.BAD_REQUEST.value())
-                    .message("Mã lớp '" + request.getClassCode() + "' đã tồn tại!")
-                    .data(null)
-                    .build();
-        }
-
         Teacher teacher = null;
         if (request.getTeacherId() != null) {
             teacher = teacherRepository.findById(request.getTeacherId()).orElse(null);
@@ -39,7 +31,7 @@ public class ClassesServiceImpl implements ClassesService {
 
         Classes newClass = Classes.builder()
                 .className(request.getClassName())
-                .classCode(request.getClassCode())
+                .classCode(generateClassCode(request.getAcademicYear()))
                 .grade(request.getGrade())
                 .roomNumber(request.getRoomNumber())
                 .academicYear(request.getAcademicYear())
@@ -60,7 +52,6 @@ public class ClassesServiceImpl implements ClassesService {
         return classesRepository.findById(id)
                 .map(existing -> {
                     existing.setClassName(request.getClassName());
-                    existing.setClassCode(request.getClassCode());
                     existing.setGrade(request.getGrade());
                     existing.setRoomNumber(request.getRoomNumber());
                     existing.setAcademicYear(request.getAcademicYear());
@@ -148,4 +139,18 @@ public class ClassesServiceImpl implements ClassesService {
                 .teacherName(c.getTeacher() != null ? c.getTeacher().getFullName() : "Chưa có giáo viên")
                 .build();
     }
+
+    private String generateClassCode(String academicYear) {
+        // Nếu năm học không có, mặc định theo năm hiện tại
+        String yearPart = (academicYear != null && !academicYear.isBlank())
+                ? academicYear
+                : String.valueOf(java.time.Year.now().getValue());
+
+        // Lấy tổng số lớp hiện tại để sinh số thứ tự tiếp theo
+        long count = classesRepository.count() + 1;
+
+        // Sinh mã có định dạng L2025-001
+        return String.format("L%s-%03d", yearPart, count);
+    }
+
 }

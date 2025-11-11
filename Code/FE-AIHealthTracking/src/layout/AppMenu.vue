@@ -19,7 +19,7 @@ const model = ref([
             { label: 'Cấu hình', icon: 'fa-solid fa-gear', to: '/school/settings' },
             { label: 'Năm học', icon: 'fa-solid fa-calendar-days', to: '/school/year' },
             { label: 'Cấp quản lý', icon: 'fa-solid fa-layer-group', to: '/school/levels' },
-            { label: 'Lớp học', icon: 'fa-solid fa-trophy', to: '/school/classes' }
+            { label: 'Lớp học', icon: 'fa-solid fa-trophy', to: '/school/class' }
         ]
     },
 
@@ -27,9 +27,10 @@ const model = ref([
     {
         label: 'Quản lý người dùng',
         items: [
-            { label: 'Nhân viên', icon: 'fa-solid fa-id-badge', to: '/school/qlNhan-Vien' },
-            { label: 'Học sinh', icon: 'fa-solid fa-graduation-cap', to: '/school/Hoc-Sinh' },
-            { label: 'Phụ huynh', icon: 'fa-solid fa-user-group', to: '/users/parents' }
+            { label: 'Giáo Viên', icon: 'fa-solid fa-id-badge', to: '/school/giao-Vien' },
+            { label: 'Học Sinh', icon: 'fa-solid fa-graduation-cap', to: '/school/Hoc-Sinh' },
+            { label: 'Phụ Huynh', icon: 'fa-solid fa-user-group', to: '/school/parent' },
+            { label: 'Nhân Viên', icon: 'fa-solid fa-id-badge', to: '/school/qlNhan-Vien' },
         ]
     },
 

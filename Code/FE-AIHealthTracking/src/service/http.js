@@ -72,3 +72,6 @@ export async function httpDownload(url, config = {}) {
     const res = await http.request({ url, method: 'GET', responseType: 'blob', ...config });
     return res.data;
 }
+
+// THÊM DÒNG NÀY để import default hoạt động:
+export default http;

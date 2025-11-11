@@ -111,27 +111,33 @@ public class AuthenticationServiceImpl implements AuthenticationService {
             if (accountRepo.existsByPhone(request.getPhone()))
                 throw new RegisterException("Số điện thoại đã được sử dụng!");
 
-            // 🧩 Tạo Teacher trực tiếp
-            Teacher teacher = Teacher.builder()
-                    .username(request.getUsername())
-                    .email(request.getEmail())
-                    .password(encoder.encode(request.getPassword()))
-                    .fullName(request.getFullName())
-                    .phone(request.getPhone())
-                    .gender(request.getGender())
-                    .dateOfBirth(request.getDateOfBirth())
-                    .avatarUrl("https://i.postimg.cc/pVs3qTMy/image.png") // Avatar mặc định
-                    .role(role)
-                    .isBlocked(false)
-                    .employeeCode(generateEmployeeCode()) // Tạo mã nhân viên tự động
-                    .specialization(request.getSpecialization())
-                    .joinDate(LocalDateTime.now())
-                    .emergencyContact(request.getEmergencyContact())
-                    .build();
+            while (true) {
+                try {
+                    Teacher teacher = Teacher.builder()
+                            .username(request.getUsername())
+                            .email(request.getEmail())
+                            .password(encoder.encode(request.getPassword()))
+                            .fullName(request.getFullName())
+                            .phone(request.getPhone())
+                            .gender(request.getGender())
+                            .dateOfBirth(request.getDateOfBirth())
+                            .avatarUrl("https://i.postimg.cc/pVs3qTMy/image.png")
+                            .role(role)
+                            .isBlocked(false)
+                            .employeeCode(generateEmployeeCodeRandom())
+                            .specialization(request.getSpecialization())
+                            .joinDate(LocalDateTime.now())
+                            .emergencyContact(request.getEmergencyContact())
+                            .build();
 
-            Teacher savedTeacher = teacherRepo.save(teacher);
+                    Teacher savedTeacher = teacherRepo.save(teacher);
+                    return "Đăng ký thành công: " + savedTeacher.getEmployeeCode();
 
-            return "Đăng ký tài khoản giáo viên thành công! Mã nhân viên: " + savedTeacher.getEmployeeCode();
+                } catch (DataIntegrityViolationException e) {
+                    System.out.println("Lỗi trùng mã -> tạo mã mới...");
+                }
+            }
+
 
         } catch (Exception e) {
             throw new RegisterException("Lỗi hệ thống khi đăng ký giáo viên: " + e.getMessage());
@@ -241,23 +247,9 @@ public class AuthenticationServiceImpl implements AuthenticationService {
                 .toUpperCase();
     }
 
-    /** GV + năm + tháng + số thứ tự */
-    private String generateEmployeeCode() {
-        LocalDateTime now = LocalDateTime.now();
-        String yearMonth = now.format(DateTimeFormatter.ofPattern("yyyyMM"));
-
-        String latestCode = teacherRepo.findLatestEmployeeCodeByMonth(yearMonth);
-        int nextNumber = 1;
-
-        if (latestCode != null && latestCode.startsWith("GV" + yearMonth)) {
-            try {
-                String numberPart = latestCode.substring(2 + yearMonth.length());
-                nextNumber = Integer.parseInt(numberPart) + 1;
-            } catch (NumberFormatException e) {
-                nextNumber = 1;
-            }
-        }
-
-        return String.format("GV%s%03d", yearMonth, nextNumber);
+    private String generateEmployeeCodeRandom() {
+        return "GV" + UUID.randomUUID().toString().replace("-", "").substring(0, 6).toUpperCase();
     }
+
+
 }
