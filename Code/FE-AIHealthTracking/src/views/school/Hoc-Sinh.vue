@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue';
+import { useRouter } from 'vue-router';
 import '@fortawesome/fontawesome-free/css/all.min.css';
 
 import DataTable from 'primevue/datatable';
@@ -11,8 +12,13 @@ import Avatar from 'primevue/avatar';
 import Menu from 'primevue/menu';
 import Paginator from 'primevue/paginator';
 
-// LƯU Ý: đang dùng JS => import kèm .js
-import { fetchStudents, exportStudentsExcel, importStudentsExcel } from '@/service/studentService.js';
+import Swal from 'sweetalert2';
+
+import { fetchStudents, exportStudentsExcel, deleteStudent, deleteStudents } from '@/service/studentService.js';
+import ImportStudentsModal from '@/components/staff/ImportStudentsModal.vue';
+import CreateStudentModal from '@/components/staff/CreateStudentModal.vue';
+
+const router = useRouter();
 
 /* Top filters */
 const years = ref([
@@ -45,7 +51,7 @@ const systems = ref([
 const selectedSystem = ref(systems.value[0]);
 
 /* Status tabs */
-const status = ref('studying'); // studying | waiting | reserved | dropped | graduated | deleted | all
+const status = ref('studying');
 const statusDefs = [
     { key: 'studying', label: 'Đang đi học', color: 'text-primary', bg: 'tab--blue' },
     { key: 'waiting', label: 'Chờ phân lớp', color: 'text-amber-600', bg: 'tab--amber' },
@@ -55,7 +61,7 @@ const statusDefs = [
     { key: 'deleted', label: 'Đã xóa', color: 'text-rose-600', bg: 'tab--red' }
 ];
 
-/* Table filters in headers */
+/* Table filters */
 const fCode = ref('');
 const fName = ref('');
 const fClass = ref('');
@@ -71,10 +77,9 @@ const sortOrder = ref(0);
 const loading = ref(false);
 const rows = ref([]);
 const totalRecords = ref(0);
-const selection = ref([]); // selected rows
+const selection = ref([]);
 
-/* Counters */
-const allData = ref([]); // full dataset for counting (mock)
+const allData = ref([]);
 const counts = computed(() => ({
     studying: allData.value.filter((x) => x.status === 'studying').length,
     waiting: allData.value.filter((x) => x.status === 'waiting').length,
@@ -85,18 +90,80 @@ const counts = computed(() => ({
     total: allData.value.length
 }));
 
-/* Row actions menu */
+/* SweetAlert toasts */
+const swalToast = Swal.mixin({
+    toast: true,
+    position: 'top-end',
+    showConfirmButton: false,
+    timer: 2400,
+    timerProgressBar: true,
+    heightAuto: false,
+    didOpen: (t) => {
+        t.addEventListener('mouseenter', Swal.stopTimer);
+        t.addEventListener('mouseleave', Swal.resumeTimer);
+    }
+});
+
+/* Quick non-blocking loading toast (auto close) */
+function quickLoadingToast(title = 'Đang xóa...', ms = 1000) {
+    return Swal.fire({
+        toast: true,
+        position: 'top-end',
+        title,
+        showConfirmButton: false,
+        timer: ms,
+        timerProgressBar: true,
+        heightAuto: false,
+        didOpen: () => Swal.showLoading(),
+        icon: undefined
+    });
+}
+
+function confirmDelete(title, text) {
+    return Swal.fire({
+        title,
+        text,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Xóa',
+        cancelButtonText: 'Hủy',
+        confirmButtonColor: '#dc2626',
+        cancelButtonColor: '#64748b',
+        reverseButtons: true,
+        heightAuto: false
+    });
+}
+
+/* disable actions while deleting to avoid duplicate clicks */
+const isDeleting = ref(false);
+
+/* Row menu */
 const rowMenu = ref();
-const rowMenuItems = ref([
-    { label: 'Xem hồ sơ', icon: 'fa-regular fa-id-card', command: () => {} },
-    { label: 'Chuyển lớp', icon: 'fa-solid fa-right-left', command: () => {} },
-    { label: 'Chuyển trường', icon: 'fa-solid fa-school-flag', command: () => {} },
-    { separator: true },
-    { label: 'Thôi học', icon: 'fa-solid fa-user-minus', command: () => {} },
-    { label: 'Bảo lưu', icon: 'fa-solid fa-tent-arrow-left-right', command: () => {} },
-    { label: 'Xóa học sinh', icon: 'fa-regular fa-trash-can', command: () => {} }
-]);
 const activeRow = ref(null);
+const rowMenuItems = ref([
+    {
+        label: 'Xem hồ sơ',
+        icon: 'fa-regular fa-id-card',
+        tone: 'primary',
+        sub: 'Mở trang chi tiết',
+        kb: '↵',
+        command: () => {
+            if (activeRow.value?.id) router.push({ name: 'StudentDetail', params: { id: activeRow.value.id } });
+        }
+    },
+    { label: 'Chuyển lớp', icon: 'fa-solid fa-right-left', tone: 'warn', sub: 'Đổi lớp hiện tại', command: () => {} },
+    { label: 'Chuyển trường', icon: 'fa-solid fa-school-flag', tone: 'info', sub: 'Chuyển sang cơ sở khác', command: () => {} },
+    { separator: true },
+    { label: 'Thôi học', icon: 'fa-solid fa-user-minus', tone: 'warn', sub: 'Tạm dừng/hủy học', command: () => {} },
+    { label: 'Bảo lưu', icon: 'fa-solid fa-tent-arrow-left-right', tone: 'info', sub: 'Giữ chỗ cho kỳ sau', command: () => {} },
+    {
+        label: 'Xóa học sinh',
+        icon: 'fa-regular fa-trash-can',
+        tone: 'danger',
+        sub: 'Không thể hoàn tác',
+        command: () => onDeleteRow(activeRow.value)
+    }
+]);
 function openRowMenu(e, row) {
     activeRow.value = row;
     rowMenu.value.toggle(e);
@@ -118,16 +185,14 @@ function formatDob(d) {
     }
 }
 
-/* Load data (mock) */
+/* Load data */
 async function load() {
     loading.value = true;
     try {
-        // fetch all for counters
         const all = await fetchStudents({ status: 'all', page: 1, size: 9999 });
         allData.value = all.items;
 
         const sort = sortField.value ? `${sortField.value},${sortOrder.value === -1 ? 'desc' : 'asc'}` : undefined;
-
         const { items, total } = await fetchStudents({
             status: status.value,
             year: selectedYear.value?.value,
@@ -142,9 +207,8 @@ async function load() {
             size: size.value,
             sort
         });
-
         rows.value = items;
-        totalRecords.value = status.value === 'all' && !fCode.value && !fName.value && !fClass.value && !fParent.value ? all.total : total; // mock behavior
+        totalRecords.value = total;
     } finally {
         loading.value = false;
     }
@@ -169,32 +233,85 @@ function onChangePage(e) {
     load();
 }
 
-/* Top actions */
 function onBulk(action) {
-    // TODO: thực thi theo selection.value
-    // console.log(action, selection.value);
+    if (action === 'delete') onBulkDelete();
 }
 async function onExport() {
     await exportStudentsExcel();
 }
-const fileInput = ref(null);
-function triggerImport() {
-    fileInput.value?.click();
+
+/* Import modal state */
+const showImport = ref(false);
+function openImport() {
+    showImport.value = true;
 }
-async function onImportChange(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    await importStudentsExcel(file);
+async function onImported() {
     await load();
 }
 
-/* React to filters (debounced for header inputs) */
+/* Create student modal state */
+const showCreate = ref(false);
+function openCreate() {
+    showCreate.value = true;
+}
+async function onStudentCreated() {
+    await load();
+}
+
+/* Xóa 1 học sinh: dùng quick loading toast (không chặn UI) và auto close */
+async function onDeleteRow(row) {
+    if (isDeleting.value || !row?.id) return;
+    const { isConfirmed } = await confirmDelete('Xóa học sinh?', `Bạn có chắc muốn xóa "${row.name}"? Thao tác không thể hoàn tác.`);
+    if (!isConfirmed) return;
+
+    isDeleting.value = true;
+    // hiển thị 1 toast loader ngắn, tự tắt
+    quickLoadingToast('Đang xóa...', 900);
+
+    try {
+        await deleteStudent(row.id, { timeoutMs: 12000 });
+        await swalToast.fire({ icon: 'success', title: `Đã xóa "${row.name}"` });
+        await load();
+    } catch (e) {
+        await swalToast.fire({ icon: 'error', title: e?.message || 'Xóa học sinh thất bại' });
+    } finally {
+        isDeleting.value = false;
+    }
+}
+
+/* Xóa nhiều: cũng dùng quick loader; kết quả báo bằng toast */
+async function onBulkDelete() {
+    if (isDeleting.value) return;
+    const ids = selection.value.map((s) => s.id);
+    if (!ids.length) {
+        await swalToast.fire({ icon: 'info', title: 'Chưa chọn học sinh nào' });
+        return;
+    }
+    const { isConfirmed } = await confirmDelete('Xóa học sinh đã chọn?', `Sẽ xóa ${ids.length} học sinh. Thao tác không thể hoàn tác.`);
+    if (!isConfirmed) return;
+
+    isDeleting.value = true;
+    quickLoadingToast(`Đang xóa ${ids.length} học sinh...`, 1200);
+
+    try {
+        const result = await deleteStudents(ids, { timeoutMs: 12000 });
+        const msg = result.fail ? `Xóa xong: ${result.ok}/${ids.length}. Lỗi: ${result.fail}` : `Đã xóa ${result.ok}/${ids.length} học sinh`;
+        await swalToast.fire({ icon: result.fail ? 'warning' : 'success', title: msg });
+        selection.value = [];
+        await load();
+    } catch (e) {
+        await swalToast.fire({ icon: 'error', title: e?.message || 'Xóa danh sách học sinh thất bại' });
+    } finally {
+        isDeleting.value = false;
+    }
+}
+
+/* Debounce filters */
 let t;
 function debounce(fn, ms = 250) {
     clearTimeout(t);
     t = setTimeout(fn, ms);
 }
-
 watch([fCode, fName, fClass, fParent], () =>
     debounce(() => {
         page.value = 1;
@@ -211,7 +328,7 @@ onMounted(load);
 
 <template>
     <div class="px-4 md:px-6 lg:px-8 py-5 space-y-4">
-        <!-- Title + total + import/export -->
+        <!-- Header -->
         <div class="flex flex-wrap items-center justify-between gap-3">
             <h1 class="text-xl font-semibold text-slate-800">Học sinh</h1>
             <div class="flex items-center gap-2">
@@ -219,13 +336,13 @@ onMounted(load);
                     <i class="fa-regular fa-clock text-primary"></i>
                     <span class="font-semibold">{{ counts.total }} học sinh</span>
                 </div>
-                <Button class="!bg-emerald-600 !border-0 !text-white" icon="fa-solid fa-file-arrow-up mr-2" label="Nhập excel" @click="triggerImport" />
-                <input ref="fileInput" type="file" accept=".xlsx,.xls,.csv" class="hidden" @change="onImportChange" />
+                <Button class="!bg-emerald-600 !border-0 !text-white" icon="fa-solid fa-file-arrow-up mr-2" label="Nhập excel" @click="openImport" />
                 <Button class="!bg-green-600 !border-0 !text-white" icon="fa-solid fa-file-arrow-down mr-2" label="Xuất excel" @click="onExport" />
+                <Button class="!bg-primary !border-0 !text-white" icon="fa-solid fa-plus mr-2" label="Tạo học sinh" @click="openCreate" />
             </div>
         </div>
 
-        <!-- Top filter row -->
+        <!-- Top filters -->
         <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
             <Dropdown v-model="selectedYear" :options="years" optionLabel="label" class="w-full" placeholder="Năm học" />
             <Dropdown v-model="selectedGrade" :options="grades" optionLabel="label" class="w-full" />
@@ -247,9 +364,7 @@ onMounted(load);
             <Button class="!bg-sky-500 !border-0 !text-white" icon="fa-solid fa-school-flag mr-2" label="Chuyển trường" @click="onBulk('school')" />
             <Button class="!bg-rose-500 !border-0 !text-white" icon="fa-solid fa-user-minus mr-2" label="Thôi học" @click="onBulk('drop')" />
             <Button class="!bg-orange-500 !border-0 !text-white" icon="fa-solid fa-tent-arrow-left-right mr-2" label="Bảo lưu" @click="onBulk('reserve')" />
-            <Button class="!bg-red-600 !border-0 !text-white" icon="fa-regular fa-trash-can mr-2" label="Xóa học sinh" @click="onBulk('delete')" />
-            <span class="flex-1"></span>
-            <Button class="!bg-primary !border-0 !text-white" icon="fa-solid fa-plus mr-2" label="Tạo học sinh" />
+            <Button class="!bg-red-600 !border-0 !text-white" :class="{ 'opacity-60 pointer-events-none': isDeleting }" :disabled="isDeleting" icon="fa-regular fa-trash-can mr-2" label="Xóa học sinh" @click="onBulk('delete')" />
         </div>
 
         <!-- Table -->
@@ -290,7 +405,7 @@ onMounted(load);
                                 <div class="font-semibold text-slate-900 truncate hover:underline cursor-pointer">{{ data.name }}</div>
                                 <div class="text-slate-500 text-sm flex items-center gap-3">
                                     <span><i class="fa-regular fa-calendar"></i> {{ formatDob(data.dob) }}</span>
-                                    <span class="flex items-center gap-1"><i :class="genderIcon(data.gender)"></i> {{ data.gender === 'F' ? 'Nữ' : 'Nam' }}</span>
+                                    <span class="flex items-center gap-1"> <i :class="genderIcon(data.gender)"></i> {{ data.gender === 'F' ? 'Nữ' : 'Nam' }} </span>
                                 </div>
                             </div>
                         </div>
@@ -312,7 +427,7 @@ onMounted(load);
                     </template>
                 </Column>
 
-                <!-- Tên phụ huynh -->
+                <!-- Phụ huynh -->
                 <Column>
                     <template #header>
                         <div class="header-filter">
@@ -323,9 +438,7 @@ onMounted(load);
                         </div>
                     </template>
                     <template #body="{ data }">
-                        <div class="text-slate-900">
-                            {{ data.parentName || '-' }}
-                        </div>
+                        <div class="text-slate-900">{{ data.parentName || '-' }}</div>
                         <div class="text-slate-500 text-sm"><i class="fa-solid fa-phone"></i> {{ data.parentPhone || '-' }}</div>
                     </template>
                 </Column>
@@ -333,30 +446,24 @@ onMounted(load);
                 <!-- Hành động -->
                 <Column header="Hành động" headerStyle="width: 6rem; text-align: right;" bodyStyle="text-align: right;">
                     <template #body="{ data }">
-                        <Button icon="fa-solid fa-ellipsis-vertical" class="!bg-transparent !border-0 !text-slate-600 hover:!bg-slate-100" @click="(e) => openRowMenu(e, data)" />
+                        <Button icon="fa-solid fa-ellipsis-vertical" class="!bg-transparent !border-0 !text-slate-600 hover:!bg-slate-100" @click="(e) => !isDeleting && openRowMenu(e, data)" />
                     </template>
                 </Column>
             </DataTable>
 
-            <!-- Paginator -->
             <div class="border-t border-slate-200">
                 <Paginator :rows="size" :totalRecords="totalRecords" :rowsPerPageOptions="[10, 20, 50]" @page="onChangePage" />
             </div>
         </div>
 
         <!-- Row menu -->
-        <Menu ref="rowMenu" :model="rowMenuItems" :popup="true">
-            <template #item="{ item }">
-                <a class="p-menuitem-link"
-                    ><i :class="['mr-2', item.icon]"></i><span>{{ item.label }}</span></a
-                >
-            </template>
-        </Menu>
+        <Menu ref="rowMenu" :model="rowMenuItems" :popup="true" appendTo="body" />
+        <ImportStudentsModal v-model:modelValue="showImport" @imported="onImported" :useServerTemplate="true" />
+        <CreateStudentModal v-model:modelValue="showCreate" @created="onStudentCreated" />
     </div>
 </template>
 
 <style scoped>
-/* Status tabs */
 .tab {
     position: relative;
     display: inline-flex;
@@ -384,28 +491,6 @@ onMounted(load);
     font-weight: 700;
     background: #e5e7eb;
 }
-
-/* subtle bg per tab type (optional) */
-.tab--blue.tab--active .tab__badge {
-    background: #dbeafe;
-}
-.tab--amber.tab--active .tab__badge {
-    background: #fde68a;
-}
-.tab--orange.tab--active .tab__badge {
-    background: #ffedd5;
-}
-.tab--rose.tab--active .tab__badge {
-    background: #fecdd3;
-}
-.tab--green.tab--active .tab__badge {
-    background: #bbf7d0;
-}
-.tab--red.tab--active .tab__badge {
-    background: #fecaca;
-}
-
-/* Header filter with sort button */
 .header-filter {
     display: flex;
     align-items: center;
@@ -424,5 +509,79 @@ onMounted(load);
 }
 .sort-btn:hover {
     background: #f1f5f9;
+}
+
+/* Menu styles giữ như cũ nếu bạn có template riêng */
+:deep(.rowmenu-panel) {
+    padding: 8px;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    box-shadow:
+        0 10px 15px -3px rgba(0, 0, 0, 0.1),
+        0 4px 6px -4px rgba(0, 0, 0, 0.1);
+    min-width: 240px;
+}
+.rowmenu-sep {
+    height: 1px;
+    background: #e5e7eb;
+    margin: 6px 4px;
+}
+.menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    color: #0f172a;
+    text-decoration: none;
+    transition:
+        background 0.15s ease,
+        color 0.15s ease;
+}
+.menu-item:hover {
+    background: #f8fafc;
+}
+.menu-item__label {
+    font-weight: 600;
+    color: #0f172a;
+    line-height: 1.1;
+}
+.menu-item__sub {
+    font-size: 12px;
+    color: #64748b;
+}
+.menu-item__kbd {
+    margin-left: 10px;
+    font-size: 11px;
+    color: #334155;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    padding: 0 6px;
+    border-radius: 6px;
+}
+.menu-item--primary i {
+    color: #2563eb;
+}
+.menu-item--info i {
+    color: #0ea5e9;
+}
+.menu-item--warn i {
+    color: #f59e0b;
+}
+.menu-item--danger i {
+    color: #dc2626;
+}
+.menu-item--danger:hover {
+    background: #fef2f2;
+}
+.menu-item--warn:hover {
+    background: #fffbeb;
+}
+.menu-item--info:hover {
+    background: #f0f9ff;
+}
+.menu-item--primary:hover {
+    background: #eff6ff;
 }
 </style>

@@ -1,79 +1,140 @@
-const USE_MOCK = (import.meta.env.VITE_USE_MOCK ?? 'true') === 'true';
-// const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080/api';
+import http from '@/service/http.js';
 
-// DỮ LIỆU MẪU (mock)
-function mockStaff() {
-    return [
-        { id: 1, name: 'vuhieutruong', email: 'tranlongvu.info@gmail.com', username: 'vuhieutruong', phone: '21356666', classes: [], role: 'Hiệu trưởng', status: 'active' },
-        { id: 2, name: 'vuqlt', email: 'tranlongvu.info@gmail.com', username: 'vuqlt', phone: '213', classes: [], role: 'Quản lý trường', status: 'active' },
-        { id: 3, name: 'yte123', email: 'tranlongvu.info@gmail.com', username: 'yte123', phone: '098856123', classes: [], role: 'Nhân viên y tế', status: 'active' },
-        { id: 4, name: 'IRTECH GIÁO VIÊN', email: 'irtech@school.com', username: 'irtechgv', phone: '0123456788', classes: ['Panda Bear - B2', 'Global'], role: 'Giáo viên', status: 'active' },
-        { id: 5, name: 'Nguyễn Thị Bích Ngọc', email: 'ngoc@school.com', username: 'ntbn', phone: '0397355723', classes: [], role: 'Giáo viên', status: 'active' },
-        { id: 6, name: 'Tài khoản bị khóa', email: 'lock@school.com', username: 'locked1', phone: '0909000111', classes: [], role: 'Nhân viên', status: 'locked' },
-        { id: 7, name: 'Đã xóa 1', email: 'deleted@school.com', username: 'deleted1', phone: '0909000222', classes: [], role: 'Nhân viên', status: 'deleted' },
-        { id: 8, name: 'Chưa đăng nhập 1', email: 'never@school.com', username: 'never1', phone: '', classes: [], role: 'Nhân viên', status: 'neverLoggedIn' }
-    ];
+/* ========== Helpers ========== */
+
+/** Map TeacherResponse (BE) -> model dùng cho bảng FE */
+function mapTeacherRow(t) {
+    // Lấy mảng tên lớp từ nhiều khả năng cấu trúc khác nhau
+    const classes = Array.isArray(t?.classes) ? t.classes.map((c) => c?.className || c?.name).filter(Boolean) : Array.isArray(t?.classNames) ? t.classNames : [];
+
+    // Suy luận status từ các trường phổ biến
+    // - isDeleted: đã xóa
+    // - isBlocked: khóa
+    // - lastLoginAt (hoặc lastLogin): nếu chưa có → neverLoggedIn, ngược lại active
+    let status = 'active';
+    const isDeleted = t?.isDeleted === true;
+    const isBlocked = t?.isBlocked === true;
+    const lastLogin = t?.lastLoginAt || t?.lastLogin || null;
+
+    if (isDeleted) status = 'deleted';
+    else if (isBlocked) status = 'locked';
+    else if (!lastLogin) status = 'neverLoggedIn';
+
+    return {
+        id: t.id,
+        name: t.fullName || t.name || '',
+        email: t.email || '',
+        username: t.username || '',
+        phone: t.phone || '',
+        classes,
+        role: t?.role?.name || t?.roleName || 'Giáo viên',
+        status
+    };
 }
 
-export async function fetchStaff(params = {}) {
-    if (USE_MOCK) {
-        const all = mockStaff();
-        let items = [...all];
+/** Lọc + tìm kiếm + sort + paginate phía FE */
+function applyFiltersSortPaginate(list, params = {}) {
+    let items = [...list];
 
-        if (params.status && params.status !== 'all') {
-            items = items.filter((s) => s.status === params.status);
-        }
-        if (params.q) {
-            const q = params.q.toLowerCase();
-            items = items.filter((s) => s.name.toLowerCase().includes(q) || s.username.toLowerCase().includes(q) || s.email.toLowerCase().includes(q) || (s.phone ?? '').toLowerCase().includes(q));
-        }
-
-        // Paging mock
-        const total = items.length;
-        const page = params.page ?? 1;
-        const size = params.size ?? 10;
-        const start = (page - 1) * size;
-        const end = start + size;
-        items = items.slice(start, end);
-
-        await new Promise((r) => setTimeout(r, 150));
-        return { items, total };
+    // status filter
+    if (params.status && params.status !== 'all') {
+        items = items.filter((x) => x.status === params.status);
     }
 
-    // TODO (sau này): gọi API Java thật
-    // const url = new URL(`${BASE_URL}/staff`);
-    // if (params.q) url.searchParams.set('q', params.q);
-    // if (params.status) url.searchParams.set('status', params.status);
-    // url.searchParams.set('page', String(params.page ?? 1));
-    // url.searchParams.set('size', String(params.size ?? 10));
-    // if (params.sort) url.searchParams.set('sort', params.sort);
-    // const res = await fetch(url, { headers: { Accept: 'application/json' } });
-    // if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    // return res.json();
+    // q: tìm theo name/username/email/phone
+    if (params.q) {
+        const q = String(params.q).toLowerCase();
+        items = items.filter((x) => (x.name || '').toLowerCase().includes(q) || (x.username || '').toLowerCase().includes(q) || (x.email || '').toLowerCase().includes(q) || (x.phone || '').toLowerCase().includes(q));
+    }
 
-    throw new Error('Not implemented: integrate Java API for fetchStaff');
+    // sort: "field,asc|desc"
+    if (params.sort) {
+        const [field, dir = 'asc'] = params.sort.split(',');
+        const mul = dir.toLowerCase() === 'desc' ? -1 : 1;
+        items.sort((a, b) => {
+            const va = a?.[field];
+            const vb = b?.[field];
+            if (va == null && vb == null) return 0;
+            if (va == null) return -1 * mul;
+            if (vb == null) return 1 * mul;
+            if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * mul;
+            return String(va).localeCompare(String(vb)) * mul;
+        });
+    }
+
+    // paginate (FE-side)
+    const total = items.length;
+    const page = Number(params.page) || 1;
+    const size = Number(params.size) || 10;
+    const start = (page - 1) * size;
+    const end = start + size;
+    items = items.slice(start, end);
+
+    return { items, total };
 }
 
+/* ========== API chính ========== */
+
+/**
+ * Lấy danh sách giáo viên từ BE rồi áp dụng filter/sort/paginate phía FE.
+ * Endpoint: GET /teachers/all
+ * Trả về: { items, total }
+ */
+export async function fetchStaff(params = {}) {
+    const res = await http.get('/teachers/all');
+
+    // Hỗ trợ cả 2 kiểu trả về: ApiResponse{data:[...]} hoặc mảng trực tiếp
+    const raw = Array.isArray(res?.data?.data) ? res.data.data : Array.isArray(res?.data) ? res.data : [];
+
+    const mapped = raw.map(mapTeacherRow);
+    return applyFiltersSortPaginate(mapped, params);
+}
+
+/**
+ * Xuất Excel (nếu BE có): GET /teachers/export
+ * Nếu chưa có, fallback CSV đơn giản.
+ */
 export async function exportStaffExcel() {
-    if (USE_MOCK) {
-        const blob = new Blob(['id,name,email\n1,Demo User,demo@school.com'], { type: 'text/csv;charset=utf-8;' });
+    try {
+        const res = await http.get('/teachers/export', { responseType: 'blob' });
+        const blob = new Blob([res.data], { type: res.headers['content-type'] || 'application/octet-stream' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        const cd = res.headers['content-disposition'] || '';
+        const m = cd.match(/filename="?([^"]+)"?/i);
+        a.href = url;
+        a.download = m ? m[1] : 'teachers.xlsx';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+    } catch {
+        // Fallback CSV
+        const { items } = await fetchStaff({ page: 1, size: 10000 });
+        const header = 'name,username,email,phone,role,status\n';
+        const lines = items.map((i) => [csv(i.name), csv(i.username), csv(i.email), csv(i.phone), csv(i.role), csv(i.status)].join(',')).join('\n');
+        const blob = new Blob([header + lines], { type: 'text/csv;charset=utf-8;' });
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
-        a.download = 'staff.csv';
+        a.download = 'teachers.csv';
         a.click();
-        return;
     }
-    // TODO: tải file từ API Java
-    throw new Error('Not implemented: exportStaffExcel');
 }
 
-export async function importStaffExcel(_file) {
-    if (USE_MOCK) {
-        await new Promise((r) => setTimeout(r, 500));
-        return;
-    }
-    // TODO: POST multipart/form-data lên API Java
-    // const form = new FormData(); form.append('file', _file);
-    // await fetch(`${BASE_URL}/staff/import`, { method: 'POST', body: form });
-    throw new Error('Not implemented: importStaffExcel');
+/**
+ * Import Excel (nếu BE có): POST /teachers/import (multipart/form-data, field "file")
+ */
+export async function importStaffExcel(file) {
+    const form = new FormData();
+    form.append('file', file);
+    await http.post('/teachers/import', form, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+    });
+}
+
+/* ========== Utils ========== */
+function csv(v) {
+    if (v == null) return '';
+    const s = String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }

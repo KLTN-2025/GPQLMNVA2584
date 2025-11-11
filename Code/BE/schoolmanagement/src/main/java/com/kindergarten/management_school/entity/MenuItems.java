@@ -3,6 +3,8 @@ package com.kindergarten.management_school.entity;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.util.List;
+
 @Getter
 @Setter
 @NoArgsConstructor
@@ -26,6 +28,6 @@ public class MenuItems {
     @Column(name = "meal_type", length = 30, nullable = false)
     private String mealType;
 
-    @Column(name = "dish_name", length = 255, nullable = false)
-    private String dishName;
+    @OneToMany(mappedBy = "menuItems", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<MenuDish> dishes;
 }

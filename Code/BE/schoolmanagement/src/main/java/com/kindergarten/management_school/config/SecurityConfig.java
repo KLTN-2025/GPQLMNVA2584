@@ -49,7 +49,7 @@ public class SecurityConfig {
                     chain.doFilter(request, response);
                 }, UsernamePasswordAuthenticationFilter.class)
                 .authorizeHttpRequests((auth) -> auth
-                        .requestMatchers("/auth/**", "/error" , "/class/**").permitAll()
+                        .requestMatchers("/auth/**", "/error" , "/classes/**").permitAll()
                         .anyRequest().authenticated()
                 )
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))

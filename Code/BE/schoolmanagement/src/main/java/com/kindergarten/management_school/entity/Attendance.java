@@ -1,10 +1,12 @@
 package com.kindergarten.management_school.entity;
 
+import com.kindergarten.management_school.utils.AttendanceStatus;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Getter
@@ -13,7 +15,10 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 @Builder
 @Entity
-@Table(name = "attendance")
+@Table(
+        name = "attendance",
+        uniqueConstraints = @UniqueConstraint(columnNames = {"student_id", "attendance_date"})
+)
 public class Attendance {
 
     @Id
@@ -29,10 +34,11 @@ public class Attendance {
     private Classes clazz;
 
     @Column(name = "attendance_date", nullable = false)
-    private LocalDateTime attendanceDate;
+    private LocalDate attendanceDate;
 
+    @Enumerated(EnumType.STRING)
     @Column(length = 20)
-    private String status;
+    private AttendanceStatus status;
 
     @Column(name = "checked_by", length = 100)
     private String checkBy;
@@ -51,3 +57,4 @@ public class Attendance {
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
 }
+

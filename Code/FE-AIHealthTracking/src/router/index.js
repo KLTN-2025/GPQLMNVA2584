@@ -20,14 +20,24 @@ const router = createRouter({
                     component: () => import('@/views/school/Trang-Chu.vue')
                 },
                 {
-                    path: 'school/qlNhan-Vien',
-                    name: 'QlNhanVien',
-                    component: () => import('@/views/school/QlNhan-Vien.vue')
+                    path: 'school/giao-Vien',
+                    name: 'TeacherManagement',
+                    component: () => import('@/views/school/Giao-Vien.vue')
                 },
                 {
                     path: 'school/Hoc-Sinh',
                     name: 'QLHocSinh',
                     component: () => import('@/views/school/Hoc-Sinh.vue')
+                },
+                {
+                    path: 'school/class',
+                    name: 'ClassManagement',
+                    component: () => import('@/views/school/class.vue')
+                },
+                {
+                    path: 'school/parent',
+                    name: 'parentManagement',
+                    component: () => import('@/views/school/phu-Huynh.vue')
                 }
             ]
         },
